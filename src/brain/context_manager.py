@@ -1,16 +1,19 @@
 # This Script is responsible for Assembling the `messages` list sent to the Model on every turn
-# It is the ONLY place that decides what the Model gets to see: the system prompt, the most
-# relevant long-term memories, and a bounded window of recent conversation.
+# It is the ONLY place that decides what the Model sees, built fresh every turn from exactly
+# four sources:
+#   1. SOUL.md       -- Jarvis's system prompt / persona (hand-edited Markdown)
+#   2. USER.md        -- user profile, injected if it exists yet (read-only for now)
+#   3. Session history -- the current conversation's recent turns, verbatim
+#   4. Semantic recall -- relevant messages pulled from EVERY other past session
 #
-# OpenAIRequestSchema deliberately does NOT own this -- it stays a stateless description of
-# a single request. Call ContextManager.build() fresh each turn and hand its output straight
-# to a new OpenAIRequestSchema(messages=...); never accumulate onto one shared schema instance.
+# OpenAIRequestSchema stays a stateless request spec -- construct a NEW instance each turn
+# with this method's output; never mutate `.messages` on a shared instance across turns.
 from typing import Dict, List
 from src.database.repository import MessageRepository
 from src.database.models import Message
 from src.memory.retriever import MemoryRetriever
+from src.memory.profile import load_soul, load_user_profile
 
-SYSTEM_PROMPT = "You are Jarvis, a helpful personal AI assistant."
 HISTORY_WINDOW = 12          # recent raw turns considered before budget trimming
 APPROX_CHARS_PER_TOKEN = 4   # rough guard so this doesn't need a tokenizer dependency
 
@@ -18,8 +21,9 @@ APPROX_CHARS_PER_TOKEN = 4   # rough guard so this doesn't need a tokenizer depe
 class ContextManager:
     """
     Builds the messages array for a single turn. Holds no conversation
-    state of its own -- everything it needs comes from the database on
-    every call, so it can never drift out of sync with what's persisted.
+    state of its own -- everything it needs comes from disk (SQLite +
+    the vector store + the two Markdown files) on every call, so it can
+    never drift out of sync with what's actually persisted.
     """
 
     def __init__(
@@ -33,14 +37,21 @@ class ContextManager:
         self.max_context_tokens = max_context_tokens
 
     def build(self, conversation_id: int, user_input: str) -> List[Dict[str, str]]:
-        messages: List[Dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages: List[Dict[str, str]] = [{"role": "system", "content": load_soul()}]
 
-        memories = self.memory_retriever.retrieve(user_input)
-        if memories:
-            recalled = "\n".join(f"- {m.content}" for m in memories)
+        user_profile = load_user_profile()
+        if user_profile:
             messages.append({
                 "role": "system",
-                "content": f"Relevant things you remember about the user:\n{recalled}",
+                "content": f"What you know about the user:\n{user_profile}",
+            })
+
+        recalled = self.memory_retriever.retrieve(user_input, exclude_conversation_id=conversation_id)
+        if recalled:
+            block = "\n".join(f"- ({r.role}, past session) {r.content}" for r in recalled)
+            messages.append({
+                "role": "system",
+                "content": f"Relevant context recalled from past sessions:\n{block}",
             })
 
         history = self.message_repo.recent(conversation_id, HISTORY_WINDOW)

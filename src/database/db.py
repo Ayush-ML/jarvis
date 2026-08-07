@@ -25,41 +25,12 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);
-
--- Long-term memory: facts/preferences/events pulled out of conversation,
--- kept separate from raw message history so they can outlive it and be
--- searched independently of any one conversation.
-CREATE TABLE IF NOT EXISTS memories (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind TEXT NOT NULL DEFAULT 'fact' CHECK (kind IN ('fact', 'preference', 'event')),
-    content TEXT NOT NULL,
-    importance REAL NOT NULL DEFAULT 0.5,
-    source_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    last_accessed_at TEXT,
-    access_count INTEGER NOT NULL DEFAULT 0
-);
-
--- FTS5 gives cheap, dependency-free keyword+BM25 ranking for retrieval.
--- Swappable for an embedding index later without touching callers, since
--- MemoryRepository.search() is the only thing that talks to this table.
-CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
-    content, content='memories', content_rowid='id'
-);
-
-CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-    INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
-END;
-
-CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-    INSERT INTO memories_fts(memories_fts, rowid, content) VALUES ('delete', old.id, old.content);
-END;
-
-CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-    INSERT INTO memories_fts(memories_fts, rowid, content) VALUES ('delete', old.id, old.content);
-    INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
-END;
 """
+
+# NOTE: no embeddings or "memories" table here on purpose. SQLite is the source of
+# truth for conversation history only. Semantic search over all past sessions is
+# handled entirely by the local vector store (see src/memory/vector_store.py),
+# which keeps its own persisted index of message content.
 
 
 class Database:

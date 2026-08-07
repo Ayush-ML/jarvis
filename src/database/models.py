@@ -20,15 +20,3 @@ class Message:
     role: str
     content: str
     created_at: Optional[str] = None
-
-
-@dataclass
-class Memory:
-    id: Optional[int]
-    content: str
-    kind: str = "fact"
-    importance: float = 0.5
-    source_message_id: Optional[int] = None
-    created_at: Optional[str] = None
-    last_accessed_at: Optional[str] = None
-    access_count: int = 0
