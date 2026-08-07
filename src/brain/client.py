@@ -83,4 +83,26 @@ class ModelClient:
         except requests.RequestException as e:
             print(f"Request failed: {e}")
             return None
-    
+
+    def stream_content(self, response: requests.Response) -> Generator[str, None, None]:
+        """
+        Parses an OpenAI-compatible SSE stream and yields text deltas as they
+        arrive. Only meaningful when the request was built with stream=True.
+        Kept here (not in main.py) because parsing the wire format is the
+        Client's job, same as building the payload is.
+        """
+        import json
+        for line in response.iter_lines(decode_unicode=True):
+            if not line or not line.startswith("data: "):
+                continue
+            data = line[len("data: "):]
+            if data.strip() == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            delta = chunk.get("choices", [{}])[0].get("delta", {})
+            content = delta.get("content")
+            if content:
+                yield content

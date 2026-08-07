@@ -11,7 +11,13 @@ import numpy as np
 @dataclass
 class OpenAIRequestSchema:
     """
-    Dataclass to Store the Structure of the Request that will be sent to the Provider, OpenAI Compatible in this case
+    Dataclass to Store the Structure of the Request that will be sent to the Provider, OpenAI Compatible in this case.
+
+    IMPORTANT: this is a STATELESS per-request spec, not a conversation buffer.
+    `messages` should always be freshly built per turn by ContextManager.build()
+    and passed in at construction time -- never mutate `.messages` on a shared
+    instance across turns, or history/memory management below this class
+    (SQLite, MemoryRetriever) is bypassed entirely.
     """
     model: str = MODEL
     messages: List[Dict[str, str]] = field(default_factory=list) # Context of the Converation

@@ -19,3 +19,9 @@ STRICT = True # Whether to Strictly Follow the Tool Schema  or not
 PROVIDER = "openai" # The Format that the Provider uses, Mainly OpenAI, Anthropic and Google
 TIMEOUT = 60 # The Timeout for the Request, in Seconds
 TOP_P = 0.9 # The Top P value for the Model, Higher the Top P, More Creative or Varied the Response
+
+# --- Database / Memory / Context Settings ---
+DB_PATH = os.getenv("DB_PATH", "data/jarvis.db") # SQLite database file location
+MEMORY_TOP_K = 5 # How many memories the MemoryRetriever pulls in per turn
+MEMORY_MIN_IMPORTANCE = 0.0 # Memories below this importance are filtered out of retrieval
+MAX_CONTEXT_TOKENS = 6000 # Approx. token budget ContextManager trims recent history to
