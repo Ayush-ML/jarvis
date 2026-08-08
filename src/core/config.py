@@ -34,3 +34,7 @@ SEMANTIC_RECENCY_HALFLIFE_DAYS = 30 # A recalled message's relevance weight halv
 VOICE = "en-GB-RyanNeural" # The Voice used to Generate the Text To Speech Audio
 RATE = "-5%" # The Rate of the Voice, Lower the Rate, Slower the Voice
 PITCH = "-3Hz" # The Pitch of the Voice, Lower the Pitch, Deeper the Voice
+SAMPLE_RATE = 16000 # Sample Rate for the Audio Stream
+CHANNELS = 1 # Mono Channel Audio Stream
+CHUNK = 1280 # 80 Ms at 16 kHz Sample Rate
+THRESHOLD = 0.3 # Model Confidence Threshold for a confirmed Trigger

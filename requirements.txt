@@ -4,3 +4,5 @@ numpy
 chromadb
 edge-tts
 asyncio
+openwakeword
+pyaudio
