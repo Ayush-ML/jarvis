@@ -7,6 +7,10 @@ import chromadb
 from typing import List, Optional, TypedDict
 from src.core.config import VECTOR_STORE_PATH, VECTOR_COLLECTION_NAME
 
+# Only these roles get embedded. Tool calls / system messages would otherwise
+# get indexed too and can surface as noise in recall for an unrelated turn.
+INDEXABLE_ROLES = {"user", "assistant"}
+
 
 class RecalledHit(TypedDict):
     message_id: int
@@ -14,6 +18,7 @@ class RecalledHit(TypedDict):
     role: str
     content: str
     distance: float
+    created_at: Optional[str]
 
 
 class VectorStore:
@@ -29,16 +34,37 @@ class VectorStore:
         collection_name: str = VECTOR_COLLECTION_NAME,
     ) -> None:
         self._client = chromadb.PersistentClient(path=path)
-        self._collection = self._client.get_or_create_collection(collection_name)
+        # Explicit cosine space: without this Chroma defaults to raw L2, which
+        # makes SEMANTIC_MAX_DISTANCE mean something different for every embedding
+        # dimensionality. Cosine keeps the [0, 2] range predictable and configurable.
+        self._collection = self._client.get_or_create_collection(
+            collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
 
-    def index_message(self, message_id: int, conversation_id: int, role: str, content: str) -> None:
-        """Embeds and stores one message. Call this right after MessageRepository.add()."""
-        if not content.strip():
+    def index_message(
+        self,
+        message_id: int,
+        conversation_id: int,
+        role: str,
+        content: str,
+        created_at: Optional[str] = None,
+    ) -> None:
+        """
+        Embeds and stores one message. Call this right after MessageRepository.add().
+        Silently no-ops for roles outside INDEXABLE_ROLES (e.g. 'system', 'tool') --
+        callers don't need to filter before calling this.
+        """
+        if role not in INDEXABLE_ROLES or not content.strip():
             return
         self._collection.upsert(
             ids=[str(message_id)],
             documents=[content],
-            metadatas=[{"conversation_id": conversation_id, "role": role}],
+            metadatas=[{
+                "conversation_id": conversation_id,
+                "role": role,
+                "created_at": created_at or "",
+            }],
         )
 
     def search(
@@ -46,11 +72,14 @@ class VectorStore:
         query: str,
         top_k: int = 5,
         exclude_conversation_id: Optional[int] = None,
+        max_distance: Optional[float] = None,
     ) -> List[RecalledHit]:
         """
-        Returns the top_k messages (any session) most semantically similar
-        to `query`. Excludes one conversation id -- normally the current
-        session, since its recent turns are already in context verbatim.
+        Returns up to top_k messages (any session) most semantically similar
+        to `query`, excluding one conversation id (normally the current session,
+        since its recent turns are already in context verbatim). If max_distance
+        is set, hits with a worse (larger) cosine distance are dropped rather
+        than just ranked low -- 'closest of a bad bunch' is not relevant.
         """
         where = None
         if exclude_conversation_id is not None:
@@ -63,13 +92,27 @@ class VectorStore:
         metas = results.get("metadatas", [[]])[0]
         distances = results.get("distances", [[]])[0]
 
-        return [
+        hits = [
             RecalledHit(
                 message_id=int(mid),
                 conversation_id=meta.get("conversation_id"),
                 role=meta.get("role"),
                 content=doc,
                 distance=dist,
+                created_at=meta.get("created_at") or None,
             )
             for mid, doc, meta, dist in zip(ids, docs, metas, distances)
         ]
+        if max_distance is not None:
+            hits = [h for h in hits if h["distance"] <= max_distance]
+        return hits
+
+    def delete_conversation(self, conversation_id: int) -> None:
+        """
+        Removes every vector belonging to one conversation. Call this BEFORE
+        deleting the conversation from SQLite (see ConversationService.delete_conversation)
+        -- if this fails, SQLite still has the conversation and the delete is
+        safe to retry; doing it in the other order risks orphaned vectors that
+        could resurface a supposedly-deleted conversation's content in recall.
+        """
+        self._collection.delete(where={"conversation_id": conversation_id})

@@ -11,6 +11,8 @@ class Conversation:
     title: Optional[str]
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    summary: Optional[str] = None
+    summarized_through_message_id: int = 0  # highest message id already folded into `summary`
 
 
 @dataclass
@@ -20,3 +22,4 @@ class Message:
     role: str
     content: str
     created_at: Optional[str] = None
+    indexed: int = 0  # 0 = not yet in the vector store, 1 = indexed. See ConversationService.

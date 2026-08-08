@@ -29,6 +29,19 @@ class ConversationRepository:
                 (conversation_id,),
             )
 
+    def update_summary(self, conversation_id: int, summary: str, summarized_through_message_id: int) -> None:
+        with self.db.cursor() as cur:
+            cur.execute(
+                """UPDATE conversations SET summary = ?, summarized_through_message_id = ?,
+                   updated_at = datetime('now') WHERE id = ?""",
+                (summary, summarized_through_message_id, conversation_id),
+            )
+
+    def delete(self, conversation_id: int) -> None:
+        """Deletes the conversation; ON DELETE CASCADE (messages FK, PRAGMA foreign_keys=ON) removes its messages too."""
+        with self.db.cursor() as cur:
+            cur.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+
 
 class MessageRepository:
     def __init__(self, db: Database) -> None:
@@ -54,6 +67,47 @@ class MessageRepository:
                        ORDER BY id DESC LIMIT ?
                    ) ORDER BY id ASC""",
                 (conversation_id, limit),
+            )
+            rows = cur.fetchall()
+        return [Message(**dict(row)) for row in rows]
+
+    def mark_indexed(self, message_id: int) -> None:
+        with self.db.cursor() as cur:
+            cur.execute("UPDATE messages SET indexed = 1 WHERE id = ?", (message_id,))
+
+    def unindexed(self, limit: int = 200) -> List[Message]:
+        """
+        Messages persisted to SQLite but not yet embedded into the vector store --
+        either because they were skipped on purpose (see ConversationService's
+        role filter) or because indexing failed at write time. Used by
+        ConversationService.backfill() to catch up.
+        """
+        with self.db.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM messages WHERE indexed = 0 ORDER BY id ASC LIMIT ?",
+                (limit,),
+            )
+            rows = cur.fetchall()
+        return [Message(**dict(row)) for row in rows]
+
+    def count(self, conversation_id: int) -> int:
+        """Cheap count used as a short-circuit before the heavier all_for_conversation() scan."""
+        with self.db.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS c FROM messages WHERE conversation_id = ?", (conversation_id,))
+            row = cur.fetchone()
+        return row["c"]
+
+    def all_for_conversation(self, conversation_id: int) -> List[Message]:
+        """
+        Every message in a conversation, oldest first. Used only by the
+        summarization trigger to work out which turns have fallen outside
+        HISTORY_WINDOW and still need folding into the summary -- guarded
+        by count() so this doesn't run on every single turn.
+        """
+        with self.db.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM messages WHERE conversation_id = ? ORDER BY id ASC",
+                (conversation_id,),
             )
             rows = cur.fetchall()
         return [Message(**dict(row)) for row in rows]

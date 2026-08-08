@@ -1,17 +1,23 @@
 # This Script is responsible for Assembling the `messages` list sent to the Model on every turn
 # It is the ONLY place that decides what the Model sees, built fresh every turn from exactly
-# four sources:
-#   1. SOUL.md       -- Jarvis's system prompt / persona (hand-edited Markdown)
-#   2. USER.md        -- user profile, injected if it exists yet (read-only for now)
+# four sources, in priority order (highest first):
+#   1. SOUL.md        -- Jarvis's system prompt / persona (mandatory, hand-edited Markdown)
+#   2. User's input     -- the current turn (mandatory)
 #   3. Session history -- the current conversation's recent turns, verbatim
-#   4. Semantic recall -- relevant messages pulled from EVERY other past session
+#   4. USER.md          -- user profile, injected if it exists yet (read-only for now)
+#   5. Semantic recall  -- relevant messages pulled from EVERY other past session
+#
+# The token budget covers the WHOLE assembled list, not just history -- SOUL.md, the
+# profile block and the recall block all count against it too. When over budget, the
+# lowest-priority pieces above are trimmed first: recall entries, then oldest history,
+# then the profile block. SOUL.md and the current input are never trimmed.
 #
 # OpenAIRequestSchema stays a stateless request spec -- construct a NEW instance each turn
 # with this method's output; never mutate `.messages` on a shared instance across turns.
 from typing import Dict, List
 from src.database.repository import MessageRepository
 from src.database.models import Message
-from src.memory.retriever import MemoryRetriever
+from src.memory.retriever import MemoryRetriever, RecalledMessage
 from src.memory.profile import load_soul, load_user_profile
 
 HISTORY_WINDOW = 12          # recent raw turns considered before budget trimming
@@ -37,16 +43,24 @@ class ContextManager:
         self.max_context_tokens = max_context_tokens
 
     def build(self, conversation_id: int, user_input: str) -> List[Dict[str, str]]:
-        messages: List[Dict[str, str]] = [{"role": "system", "content": load_soul()}]
-
+        soul = load_soul()
         user_profile = load_user_profile()
-        if user_profile:
-            messages.append({
-                "role": "system",
-                "content": f"What you know about the user:\n{user_profile}",
-            })
-
         recalled = self.memory_retriever.retrieve(user_input, exclude_conversation_id=conversation_id)
+        history = self.message_repo.recent(conversation_id, HISTORY_WINDOW)
+
+        budget_chars = self.max_context_tokens * APPROX_CHARS_PER_TOKEN
+        remaining = budget_chars - len(soul) - len(user_input)
+
+        history, remaining = self._fit_history(history, remaining)
+        recalled, remaining = self._fit_recalled(recalled, remaining)
+        if user_profile and len(user_profile) > remaining:
+            user_profile = None  # profile is lowest priority -- drop it whole rather than truncate mid-sentence
+
+        messages: List[Dict[str, str]] = [{"role": "system", "content": soul}]
+
+        for msg in history:
+            messages.append({"role": msg.role, "content": msg.content})
+
         if recalled:
             block = "\n".join(f"- ({r.role}, past session) {r.content}" for r in recalled)
             messages.append({
@@ -54,20 +68,35 @@ class ContextManager:
                 "content": f"Relevant context recalled from past sessions:\n{block}",
             })
 
-        history = self.message_repo.recent(conversation_id, HISTORY_WINDOW)
-        for msg in self._fit_to_budget(history):
-            messages.append({"role": msg.role, "content": msg.content})
+        if user_profile:
+            messages.append({
+                "role": "system",
+                "content": f"What you know about the user:\n{user_profile}",
+            })
 
         messages.append({"role": "user", "content": user_input})
         return messages
 
-    def _fit_to_budget(self, history: List[Message]) -> List[Message]:
-        """Drop the oldest turns first until the window fits the token budget."""
-        budget_chars = self.max_context_tokens * APPROX_CHARS_PER_TOKEN
+    @staticmethod
+    def _fit_history(history: List[Message], remaining: int) -> tuple[List[Message], int]:
+        """Keeps as many of the most recent turns as fit, dropping oldest first."""
         kept, used = [], 0
         for msg in reversed(history):
-            used += len(msg.content)
-            if used > budget_chars:
+            cost = len(msg.content)
+            if used + cost > remaining:
                 break
+            used += cost
             kept.append(msg)
-        return list(reversed(kept))
+        return list(reversed(kept)), remaining - used
+
+    @staticmethod
+    def _fit_recalled(recalled: List[RecalledMessage], remaining: int) -> tuple[List[RecalledMessage], int]:
+        """Keeps the most relevant recall hits first (list is already similarity-ranked), drops the rest."""
+        kept, used = [], 0
+        for msg in recalled:
+            cost = len(msg.content)
+            if used + cost > remaining:
+                break
+            used += cost
+            kept.append(msg)
+        return kept, remaining - used
