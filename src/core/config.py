@@ -39,3 +39,6 @@ SAMPLE_RATE = 16000 # Sample Rate for the Audio Stream
 CHANNELS = 1 # Mono Channel Audio Stream
 CHUNK = 1280 # 80 Ms at 16 kHz Sample Rate
 THRESHOLD = 0.3 # Model Confidence Threshold for a confirmed Trigger
+STT_MODEL_SIZE = "small" # faster-whisper model size -- "small" chosen for 8GB RAM / CPU-only hardware, bump to "medium"+ only with a GPU or more headroom
+STT_DEVICE = "cpu" # No CUDA/ROCm path on this hardware -- CPU inference only
+STT_COMPUTE_TYPE = "int8" # Quantized for CPU speed and lower memory use; "float32" is more accurate but ~4x slower on CPU

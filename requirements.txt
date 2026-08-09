@@ -6,3 +6,4 @@ edge-tts
 asyncio
 openwakeword
 pyaudio
+faster-whisper
