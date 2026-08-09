@@ -1,26 +1,30 @@
 # This Script is responsible for Assembling the `messages` list sent to the Model on every turn
 # It is the ONLY place that decides what the Model sees, built fresh every turn from exactly
-# four sources, in priority order (highest first):
-#   1. SOUL.md        -- Jarvis's system prompt / persona (mandatory, hand-edited Markdown)
-#   2. User's input     -- the current turn (mandatory)
-#   3. Session history -- the current conversation's recent turns, verbatim
-#   4. USER.md          -- user profile, injected if it exists yet (read-only for now)
+# five sources, in priority order (highest first, i.e. dropped last when over budget):
+#   1. SOUL.md         -- Jarvis's system prompt / persona (mandatory, hand-edited Markdown)
+#   2. User's input      -- the current turn (mandatory)
+#   3. Session history  -- the current conversation's recent turns, verbatim
+#   4. Rolling summary  -- condensed record of this SAME conversation's turns that have
+#                          already fallen out of the history window (see ConversationService
+#                          / Summarizer) -- without this, a long single session just silently
+#                          loses its early turns once HISTORY_WINDOW is exceeded
 #   5. Semantic recall  -- relevant messages pulled from EVERY other past session
+#   6. USER.md           -- user profile, injected if it exists yet (read-only for now)
 #
-# The token budget covers the WHOLE assembled list, not just history -- SOUL.md, the
-# profile block and the recall block all count against it too. When over budget, the
-# lowest-priority pieces above are trimmed first: recall entries, then oldest history,
-# then the profile block. SOUL.md and the current input are never trimmed.
+# The token budget covers the WHOLE assembled list, not just history -- SOUL.md, the summary,
+# the recall block and the profile block all count against it too. When over budget, the
+# lowest-priority pieces above are trimmed first: profile, then recall, then the summary,
+# then oldest history. SOUL.md and the current input are never trimmed.
 #
 # OpenAIRequestSchema stays a stateless request spec -- construct a NEW instance each turn
 # with this method's output; never mutate `.messages` on a shared instance across turns.
-from typing import Dict, List
-from src.database.repository import MessageRepository
+from typing import Dict, List, Tuple
+from src.database.repository import MessageRepository, ConversationRepository
 from src.database.models import Message
 from src.memory.retriever import MemoryRetriever, RecalledMessage
 from src.memory.profile import load_soul, load_user_profile
+from src.core.config import HISTORY_WINDOW
 
-HISTORY_WINDOW = 12          # recent raw turns considered before budget trimming
 APPROX_CHARS_PER_TOKEN = 4   # rough guard so this doesn't need a tokenizer dependency
 
 
@@ -35,16 +39,20 @@ class ContextManager:
     def __init__(
         self,
         message_repo: MessageRepository,
+        conversation_repo: ConversationRepository,
         memory_retriever: MemoryRetriever,
         max_context_tokens: int = 6000,
     ) -> None:
         self.message_repo = message_repo
+        self.conversation_repo = conversation_repo
         self.memory_retriever = memory_retriever
         self.max_context_tokens = max_context_tokens
 
     def build(self, conversation_id: int, user_input: str) -> List[Dict[str, str]]:
         soul = load_soul()
         user_profile = load_user_profile()
+        conversation = self.conversation_repo.get(conversation_id)
+        summary = conversation.summary if conversation else None
         recalled = self.memory_retriever.retrieve(user_input, exclude_conversation_id=conversation_id)
         history = self.message_repo.recent(conversation_id, HISTORY_WINDOW)
 
@@ -52,11 +60,17 @@ class ContextManager:
         remaining = budget_chars - len(soul) - len(user_input)
 
         history, remaining = self._fit_history(history, remaining)
+        summary, remaining = self._fit_block(summary, remaining)
         recalled, remaining = self._fit_recalled(recalled, remaining)
-        if user_profile and len(user_profile) > remaining:
-            user_profile = None  # profile is lowest priority -- drop it whole rather than truncate mid-sentence
+        user_profile, remaining = self._fit_block(user_profile, remaining)
 
         messages: List[Dict[str, str]] = [{"role": "system", "content": soul}]
+
+        if summary:
+            messages.append({
+                "role": "system",
+                "content": f"Summary of earlier parts of this conversation:\n{summary}",
+            })
 
         for msg in history:
             messages.append({"role": msg.role, "content": msg.content})
@@ -78,7 +92,7 @@ class ContextManager:
         return messages
 
     @staticmethod
-    def _fit_history(history: List[Message], remaining: int) -> tuple[List[Message], int]:
+    def _fit_history(history: List[Message], remaining: int) -> Tuple[List[Message], int]:
         """Keeps as many of the most recent turns as fit, dropping oldest first."""
         kept, used = [], 0
         for msg in reversed(history):
@@ -90,7 +104,7 @@ class ContextManager:
         return list(reversed(kept)), remaining - used
 
     @staticmethod
-    def _fit_recalled(recalled: List[RecalledMessage], remaining: int) -> tuple[List[RecalledMessage], int]:
+    def _fit_recalled(recalled: List[RecalledMessage], remaining: int) -> Tuple[List[RecalledMessage], int]:
         """Keeps the most relevant recall hits first (list is already similarity-ranked), drops the rest."""
         kept, used = [], 0
         for msg in recalled:
@@ -100,3 +114,12 @@ class ContextManager:
             used += cost
             kept.append(msg)
         return kept, remaining - used
+
+    @staticmethod
+    def _fit_block(text, remaining: int):
+        """Shared all-or-nothing fit for a single text block (summary or profile) -- never truncated mid-sentence."""
+        if not text:
+            return text, remaining
+        if len(text) > remaining:
+            return None, remaining
+        return text, remaining - len(text)
