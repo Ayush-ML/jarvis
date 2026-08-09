@@ -3,8 +3,9 @@
 # It gives the specific Configs into the Request to make them match
 # Importing Necessary Libraries
 import requests
-from typing import Dict, Any, List, Generator
+from typing import Dict, Any, List, Generator, Optional
 from src.brain.request_schema import OpenAIRequestSchema
+from src.brain.rate_limiter import RateLimiter, default_rate_limiter
 from src.core.config import TIMEOUT
 
 # The Agent Class
@@ -12,17 +13,21 @@ class ModelClient:
     """
     Class that verifies the Request Schema and Posts a Request to the provider using that Schema
     """
-    def __init__(self, request: OpenAIRequestSchema, base_url: str, api_key: str) -> None:
+    def __init__(self, request: OpenAIRequestSchema, base_url: str, api_key: str, rate_limiter: Optional[RateLimiter] = None) -> None:
         """
         Initializes the ModelClient with the request schema, base URL, and API key.
         Args:
             request (OpenAIRequestSchema): The request schema containing the parameters for the request.
             base_url (str): The base URL of the provider's API.
             api_key (str): The API key for authentication with the provider.
+            rate_limiter (RateLimiter, optional): Shared limiter throttling calls to the provider.
+                Defaults to the module-level default_rate_limiter -- pass one in explicitly only if
+                you deliberately want a separate throttle (e.g. a different provider/quota).
         """
         self.request = request
         self.base_url = base_url.rstrip('/')  # Ensure no trailing slash in base_url
         self.api_key = api_key
+        self.rate_limiter = rate_limiter or default_rate_limiter
         self.session = requests.Session()  # Create a session for connection pooling
         self.session.headers.update({
             "Authorization": f"Bearer {self.api_key}",
@@ -66,11 +71,14 @@ class ModelClient:
     def post(self) -> requests.Response | None:
         """
         Sends a POST request to the provider's API with the constructed payload.
+        Blocks briefly beforehand if the shared rate limiter has no token available --
+        this is where the 40 RPM throttle is actually enforced.
         Returns:
             response (requests.Response): The response from the provider's API.
         Raises:
             requests.RequestException: If there is an error during the request.
         """
+        self.rate_limiter.acquire()
         try:
             response = self.session.post(
                 url=self._endpoint(),

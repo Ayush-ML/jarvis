@@ -18,6 +18,7 @@ API_KEY = os.getenv("API_KEY") # The API Key for the Provider, Stored in the .en
 STRICT = True # Whether to Strictly Follow the Tool Schema  or not
 PROVIDER = "openai" # The Format that the Provider uses, Mainly OpenAI, Anthropic and Google
 TIMEOUT = 60 # The Timeout for the Request, in Seconds
+RATE_LIMIT_RPM = 40 # Max requests per minute to the Model Provider, enforced by RateLimiter
 TOP_P = 0.9 # The Top P value for the Model, Higher the Top P, More Creative or Varied the Response
 DB_PATH = "data/jarvis.db" # SQLite database file location (conversation history only)
 MAX_CONTEXT_TOKENS = 6000 # Approx. token budget ContextManager trims recent history to
