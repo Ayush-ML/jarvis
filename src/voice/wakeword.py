@@ -1,71 +1,43 @@
-# This Script is responsible for the wakeword detection Model 
-# It uses Openwakeword's Built in hey_jarvis model to detect the Wake word
-# Low Confidence Threshold as it is a Small Model
-# Importing Necessary Libraries
-import time
-import threading
+# This Script is responsible for Wake-word detection using OpenWakeWord's built-in hey_jarvis model
+# Loads the model once and exposes check() per audio chunk -- same reasoning as Transcriber/VAD:
+# the model needs to persist across calls rather than reload every time, which is why this is a
+# class and not a bare function. Supersedes the previous standalone wakeword() function, which
+# owned its own PyAudio stream and loop internally -- that design couldn't compose with VAD/AEC
+# needing to run on the SAME stream, which VoiceListener (src/voice/listener.py) now needs to do.
 import numpy as np
-import pyaudio
 import openwakeword
-from typing import Callable, Optional
-from src.core.config import SAMPLE_RATE, CHANNELS, CHUNK, THRESHOLD
+from typing import Iterable
+from src.core.config import THRESHOLD
 
-def wakeword(on_detected: Callable[[], None], stop_event: Optional[threading.Event] = None) -> None:
+DEFAULT_MODELS = ("hey_jarvis",)
+
+
+class WakeWordDetector:
     """
-    Function that handles the wakeword detection. Blocks the calling thread until
-    `stop_event` is set, so this should always be started on its own thread, e.g.
-    threading.Thread(target=wakeword, args=(on_detected, stop_event), daemon=True).start()
-
-    Args:
-        on_detected: called with no arguments every time the wake word is heard.
-            This is the only way anything outside this function learns detection
-            happened -- previously nothing did (see below).
-        stop_event: set this from another thread to stop listening and return
-            cleanly. If omitted, a fresh Event is created and this effectively
-            runs forever -- only fine if you're okay killing the whole thread to stop it.
+    Construct ONCE per audio stream/thread -- same lifecycle and thread-safety
+    caveat as Transcriber/VoiceActivityDetector.
     """
-    if stop_event is None:
-        stop_event = threading.Event()
 
-    model = openwakeword.model.Model(
-        wakeword_models=["hey_jarvis"], # Initialize Model in ONNX Format
-        inference_framework="onnx",
-    )
-    
-    audio = pyaudio.PyAudio()
-    stream = audio.open(
-        format=pyaudio.paInt16,
-        channels=CHANNELS, # Initialize Audio Stream
-        rate=SAMPLE_RATE,
-        input=True,
-        frames_per_buffer=CHUNK
-    )
+    def __init__(self, threshold: float = THRESHOLD, wakeword_models: Iterable[str] = DEFAULT_MODELS) -> None:
+        self._model = openwakeword.model.Model(
+            wakeword_models=list(wakeword_models),
+            inference_framework="onnx",
+        )
+        self._threshold = threshold
 
-    try:
-        while not stop_event.is_set():
-            audio_bytes = stream.read(
-                CHUNK,
-                exception_on_overflow=False,
-            )
-            pcm = np.frombuffer(  # Read Audio
-                audio_bytes,
-                dtype=np.int16,
-            )
+    def check(self, pcm: np.ndarray) -> bool:
+        """
+        Feed one audio chunk -- this project uses CHUNK=1280 samples (80ms at
+        16kHz), the same input format the original wakeword() implementation
+        used, so no new assumption is introduced here. Returns True at most
+        once per trigger and resets the model's internal state when it does.
+        """
+        predictions = self._model.predict(pcm)
+        for _, score in predictions.items():
+            if score >= self._threshold:
+                self._model.reset()
+                return True
+        return False
 
-            predictions = model.predict(pcm) # Predict on Audio
-
-            for _, score in predictions.items():
-                if score >= THRESHOLD:
-                    model.reset()
-                    on_detected()  # FIX: this is the only line that actually notifies the app -- previously nothing did
-                    time.sleep(0.5)
-                    break
-                
-    except Exception as e:
-        print(f"Got Error in Wakeword detection as {e}")
-        
-    finally:
-        stream.stop_stream()
-        stream.close()
-        audio.terminate()
-        return 
+    def reset(self) -> None:
+        self._model.reset()
