@@ -7,3 +7,5 @@ asyncio
 openwakeword
 pyaudio
 faster-whisper
+silero-vad
+onnxruntime

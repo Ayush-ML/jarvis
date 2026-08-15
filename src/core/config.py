@@ -42,3 +42,6 @@ THRESHOLD = 0.3 # Model Confidence Threshold for a confirmed Trigger
 STT_MODEL_SIZE = "small" # faster-whisper model size -- "small" chosen for 8GB RAM / CPU-only hardware, bump to "medium"+ only with a GPU or more headroom
 STT_DEVICE = "cpu" # No CUDA/ROCm path on this hardware -- CPU inference only
 STT_COMPUTE_TYPE = "int8" # Quantized for CPU speed and lower memory use; "float32" is more accurate but ~4x slower on CPU
+VAD_THRESHOLD = 0.5 # Silero's own recommended default -- speech probabilities above this are treated as speech
+VAD_SILENCE_MS = 800 # Confirmed silence duration before a speech segment is considered ENDED (a command-capture UX choice, deliberately more patient than Silero's own 100ms default which is tuned for offline segment-finding, not "wait until the user is clearly done talking")
+VAD_SPEECH_PAD_MS = 100 # Silero's own edge-padding on reported start/end timestamps, guarding against the ~32ms detection latency clipping the first phoneme -- NOT a substitute for a caller-side rolling pre-buffer (see VoiceActivityDetector docstring)
