@@ -9,3 +9,4 @@ pyaudio
 faster-whisper
 silero-vad
 onnxruntime
+pywebrtc-audio
