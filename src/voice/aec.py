@@ -1,28 +1,7 @@
 # This Script is responsible for Acoustic Echo Cancellation (AEC) using WebRTC's AEC3 algorithm,
-# via pywebrtc-audio (pybind11 bindings over the actual Chrome/WebRTC audio processing module --
-# prebuilt wheels for Windows/Linux/macOS, no compile toolchain needed on this machine).
-#
-# ============================================================================================
-# THIS CLASS ALONE DOES NOT CANCEL ANY ECHO YET -- IT NEEDS A REFERENCE SIGNAL THAT DOES NOT
-# EXIST IN THIS CODEBASE. process(near, far) requires `far`: the EXACT audio samples currently
-# being sent to the speaker, sample-count-aligned with `near` (the mic capture) and roughly
-# time-aligned (AEC3's internal delay estimator handles the rest, helped by
-# config.AEC_STREAM_DELAY_MS as a convergence hint).
-#
-# Right now, src/voice/tts.py pipes Edge TTS's compressed audio bytes straight into an external
-# `ffplay` subprocess's stdin. Nothing in this Python process ever sees the decoded PCM that
-# actually reaches the speaker -- there is currently NO source for `far`. Making this class do
-# anything real requires:
-#   1. Rewriting tts.py to decode and own playback itself (e.g. write PCM to a PyAudio output
-#      stream) instead of handing off to ffplay, so the exact played samples can also be queued
-#      as the reference signal.
-#   2. Reconciling Edge TTS's actual output sample rate against this pipeline's 16kHz.
-#   3. A synchronization mechanism so that for every `near` chunk captured, the matching `far`
-#      chunk (what was playing at that same moment) is available -- two independently-buffered
-#      OS audio streams, so this is a real timing problem, not just "grab the last N samples."
-# None of that is implemented here. This file is only the verified, ready-to-use cancellation
-# primitive -- correct now, inert until the plumbing above exists.
-# ============================================================================================
+# via pywebrtc-audio (pybind11 bindings, prebuilt Windows/Linux/macOS wheels). `far` -- the
+# reference signal for what's currently playing on the speaker -- comes from
+# src/voice/playback_reference.py, which tts.py now pushes into as it plays.
 import numpy as np
 from pywebrtc_audio import EchoCanceller as _WebRTCEchoCanceller
 from src.core.config import SAMPLE_RATE, AEC_STREAM_DELAY_MS
@@ -56,13 +35,10 @@ class EchoCanceller:
     def process(self, near: np.ndarray, far: np.ndarray) -> np.ndarray:
         """
         near: mic capture signal (int16 or float32, any length).
-        far:  the reference signal for what's playing on the speaker RIGHT NOW,
-              same length and dtype as `near`. There is no source for this in
-              this codebase yet (see module docstring) -- passing silence,
-              stale audio, or misaligned audio here doesn't raise an error,
-              it just produces bad or no cancellation. Correctness of `far`
-              is entirely the caller's responsibility; this method cannot
-              detect or warn about a wrong reference signal.
+        far:  reference signal for what's playing on the speaker right now, same
+              length and dtype as `near` -- pull this from PlaybackReferenceBuffer.pull(len(near)).
+              Wrong/misaligned/stale `far` doesn't raise an error, it just produces
+              bad or no cancellation -- correctness here is the caller's responsibility.
         Returns audio with echo removed -- same dtype and length as `near`.
         """
         if len(near) != len(far):
