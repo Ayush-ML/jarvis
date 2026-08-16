@@ -49,3 +49,6 @@ AEC_STREAM_DELAY_MS = 0 # Hint for AEC3's delay estimator: ms between writing au
 COMMAND_START_TIMEOUT_SECONDS = 5 # If VAD hasn't confirmed speech this long after wake-word detection, abandon capture and return to listening -- probably a false trigger or the user changed their mind
 VAD_MAX_COMMAND_SECONDS = 15 # Hard safety cap on total command-capture duration regardless of VAD state -- guards against a misfiring VAD never reporting 'end' on continuous background noise (TV, music)
 SPEAKING_MONITOR_SECONDS = 1.0 # How much recent audio VoiceListener retains as pre-roll while monitoring for a barge-in interruption during SPEAKING state -- bounded, not the full TTS duration, since most of it gets discarded if nobody interrupts
+MCP_CONFIG_PATH = "data/mcp_servers.json" # JSON config listing MCP servers to connect to -- mirrors the standard "mcpServers" object convention (same shape as Claude Desktop's config)
+MCP_CONNECT_TIMEOUT_SECONDS = 15 # Max time to wait for a single MCP server to connect before giving up on it and moving on to the rest
+MCP_MAX_INPUT_REQUIRED_ROUNDS = 10 # Safety cap on elicitation retry rounds per tool call -- matches mcp.Client's own default, kept the same for familiarity even though ClientSessionGroup needs its own hand-rolled loop

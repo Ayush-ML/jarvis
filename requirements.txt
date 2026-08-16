@@ -10,3 +10,4 @@ faster-whisper
 silero-vad
 onnxruntime
 pywebrtc-audio
+mcp
