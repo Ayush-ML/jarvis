@@ -59,7 +59,7 @@ class VoiceActivityDetector:
         self._window_samples = _WINDOW_SAMPLES_16K if sampling_rate == 16000 else _WINDOW_SAMPLES_8K
         self._buffer = np.empty(0, dtype=np.float32)
 
-    def process(self, pcm: np.ndarray) -> List[Dict[str, int]]:
+    def process(self, pcm: np.ndarray) -> List[Dict[str, int | float]]:
         """
         Feed in a chunk of int16 (or already-float32) mono PCM of any length.
         Returns a list of events fired while processing it -- each either
@@ -69,7 +69,7 @@ class VoiceActivityDetector:
         treat it as "how many samples back", not an absolute file position.
         """
         self._buffer = np.concatenate([self._buffer, self._to_float32(pcm)])
-        events: List[Dict[str, int]] = []
+        events: List[Dict[str, int | float]] = []
 
         while len(self._buffer) >= self._window_samples:
             window = self._buffer[: self._window_samples]

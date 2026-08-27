@@ -5,8 +5,8 @@
 # owned its own PyAudio stream and loop internally -- that design couldn't compose with VAD/AEC
 # needing to run on the SAME stream, which VoiceListener (src/voice/listener.py) now needs to do.
 import numpy as np
-import openwakeword
-from typing import Iterable
+from openwakeword.model import Model
+from typing import Iterable, cast
 from src.core.config import THRESHOLD
 
 DEFAULT_MODELS = ("hey_jarvis",)
@@ -19,7 +19,7 @@ class WakeWordDetector:
     """
 
     def __init__(self, threshold: float = THRESHOLD, wakeword_models: Iterable[str] = DEFAULT_MODELS) -> None:
-        self._model = openwakeword.model.Model(
+        self._model = Model(
             wakeword_models=list(wakeword_models),
             inference_framework="onnx",
         )
@@ -32,7 +32,7 @@ class WakeWordDetector:
         used, so no new assumption is introduced here. Returns True at most
         once per trigger and resets the model's internal state when it does.
         """
-        predictions = self._model.predict(pcm)
+        predictions = cast(dict[str, float], self._model.predict(pcm))
         for _, score in predictions.items():
             if score >= self._threshold:
                 self._model.reset()

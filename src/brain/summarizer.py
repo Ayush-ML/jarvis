@@ -22,13 +22,13 @@ SUMMARY_SYSTEM_PROMPT = (
 
 
 class Summarizer:
-    def __init__(self, base_url: str = BASE_URL, api_key: str = API_KEY, model: str = MODEL) -> None:
+    def __init__(self, base_url: str | None = BASE_URL, api_key: str | None = API_KEY, model: str = MODEL) -> None:
         self.base_url = base_url
         self.api_key = api_key
         self.model = model
 
     def summarize(self, previous_summary: Optional[str], messages: List[Message]) -> str:
-        transcript = "\n".join(f"{m.role}: {m.content}" for m in messages)
+        transcript = "\n".join(f"{m.role}: {m.content['text']}" for m in messages)
         user_content = (
             f"Previous summary:\n{previous_summary or '(none yet)'}\n\n"
             f"New messages to fold in:\n{transcript}"
@@ -36,8 +36,8 @@ class Summarizer:
         request = OpenAIRequestSchema(
             model=self.model,
             messages=[
-                {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
+                {"role": "system", "content": {"type": "text", "text": SUMMARY_SYSTEM_PROMPT}},
+                {"role": "user", "content": {"type": "text", "text": user_content}},
             ],
             stream=False,   # this is a one-off structured call, not a chat turn -- no need to stream
             thinking=False, # condensing text doesn't need extended reasoning; keeps this call fast

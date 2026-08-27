@@ -13,7 +13,7 @@ class ModelClient:
     """
     Class that verifies the Request Schema and Posts a Request to the provider using that Schema
     """
-    def __init__(self, request: OpenAIRequestSchema, base_url: str, api_key: str, rate_limiter: Optional[RateLimiter] = None) -> None:
+    def __init__(self, request: OpenAIRequestSchema, base_url: str | None, api_key: str | None, rate_limiter: Optional[RateLimiter] = None) -> None:
         """
         Initializes the ModelClient with the request schema, base URL, and API key.
         Args:
@@ -25,7 +25,10 @@ class ModelClient:
                 you deliberately want a separate throttle (e.g. a different provider/quota).
         """
         self.request = request
-        self.base_url = base_url.rstrip('/')  # Ensure no trailing slash in base_url
+        if base_url is str:
+            self.base_url = base_url.rstrip("/") # Ensure no trailing slash in base_url
+        else:
+            self.base_url = base_url  
         self.api_key = api_key
         self.rate_limiter = rate_limiter or default_rate_limiter
         self.session = requests.Session()  # Create a session for connection pooling
@@ -101,7 +104,10 @@ class ModelClient:
         """
         import json
         for line in response.iter_lines(decode_unicode=True):
-            if not line or not line.startswith("data: "):
+            if isinstance(line, bytes):
+                line = line.decode("utf-8")
+                
+            if not line or not line.startswith("data:"):
                 continue
             data = line[len("data: "):]
             if data.strip() == "[DONE]":

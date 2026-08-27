@@ -45,7 +45,7 @@ from mcp import ClientSessionGroup, StdioServerParameters, MCPError
 from mcp.client.session_group import StreamableHttpParameters, SseServerParameters
 from mcp.types import (
     Implementation, TextContent,
-    InputRequiredResult, InputRequest, InputResponse,
+    InputRequiredResult, InputResponse,
     ElicitRequest, ElicitResult,
 )
 
@@ -87,20 +87,30 @@ class MCPRegistry:
 
     def start(self) -> None:
         """Spins up the background loop and connects to every configured server. Blocks until ready."""
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._ready.clear()
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
-        self._ready.wait()
+        # _run_loop always sets this event, including when initialization fails.
+        self._ready.wait(timeout=MCP_CONNECT_TIMEOUT_SECONDS + 5)
+        if not self._ready.is_set():
+            raise RuntimeError("Timed out while starting the MCP registry")
 
     def stop(self) -> None:
-        if self._loop is None:
+        loop = self._loop
+        if loop is None or not loop.is_running():
             return
         try:
-            asyncio.run_coroutine_threadsafe(self._disconnect_all(), self._loop).result(timeout=10)
+            asyncio.run_coroutine_threadsafe(self._disconnect_all(), loop).result(timeout=10)
         except Exception:
             logger.warning("Error disconnecting MCP servers", exc_info=True)
-        self._loop.call_soon_threadsafe(self._loop.stop)
+        loop.call_soon_threadsafe(loop.stop)
         if self._thread is not None:
             self._thread.join(timeout=5)
+        self._loop = None
+        self._thread = None
+        self._group = None
 
     def list_openai_tools(self) -> List[Dict[str, Any]]:
         """Converts every connected server's tools into the OpenAI tool-calling schema, ready to merge into OpenAIRequestSchema.tools."""
@@ -126,27 +136,41 @@ class MCPRegistry:
         role: "tool" message's content -- never raises; failures come back
         as a "Tool error: ..." string so a bad tool call can't crash a turn.
         """
-        if self._loop is None:
+        if self._loop is None or not self._loop.is_running():
             return "Tool error: MCP registry has not been started."
         future = asyncio.run_coroutine_threadsafe(self._call_tool_async(name, arguments), self._loop)
-        return future.result()
+        try:
+            return future.result()
+        except Exception as exc:
+            logger.warning("Unexpected MCP tool-call failure for '%s'", name, exc_info=True)
+            return f"Tool error calling '{name}': {exc}"
 
     # -- internals, all run on the background loop's thread --
 
     def _run_loop(self) -> None:
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
-        self._loop.run_until_complete(self._connect_all())
+        try:
+            self._loop.run_until_complete(self._connect_all())
+        except Exception:
+            logger.warning("Failed to initialize the MCP registry", exc_info=True)
+            self._ready.set()
+            self._loop.close()
+            return
         self._ready.set()
-        self._loop.run_forever()
+        try:
+            self._loop.run_forever()
+        finally:
+            self._loop.close()
 
     async def _connect_all(self) -> None:
-        self._group = ClientSessionGroup(component_name_hook=_namespaced_name)
-        await self._group.__aenter__()
+        group = ClientSessionGroup(component_name_hook=_namespaced_name)
+        self._group = group
+        await group.__aenter__()
         for name, params in self._load_config().items():
             try:
                 await asyncio.wait_for(
-                    self._group.connect_to_server(params),
+                    group.connect_to_server(params),
                     timeout=MCP_CONNECT_TIMEOUT_SECONDS,
                 )
             except Exception:
@@ -165,6 +189,9 @@ class MCPRegistry:
         try:
             result = await self._group.call_tool(name, arguments, allow_input_required=True)
         except MCPError as e:
+            return f"Tool error calling '{name}': {e}"
+        except Exception as e:
+            logger.warning("Unexpected error calling MCP tool '%s'", name, exc_info=True)
             return f"Tool error calling '{name}': {e}"
 
         rounds = 0
@@ -189,6 +216,9 @@ class MCPRegistry:
                     allow_input_required=True,
                 )
             except MCPError as e:
+                return f"Tool error calling '{name}': {e}"
+            except Exception as e:
+                logger.warning("Unexpected error calling MCP tool '%s'", name, exc_info=True)
                 return f"Tool error calling '{name}': {e}"
 
         text_parts = [block.text for block in result.content if isinstance(block, TextContent)]

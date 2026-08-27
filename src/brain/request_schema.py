@@ -4,8 +4,9 @@
 # Importing Necessary Libraries
 from src.core.config import STREAM, TEMPERATURE, MAX_TOKENS, TOOL_CHOICE, THINKING, BASE_URL, MODEL, API_KEY, STRICT
 from dataclasses import dataclass, field 
-from typing import Any, List, Dict, Optional
+from typing import Any, List, Optional, Dict
 import numpy as np
+from src.core.message_types import ChatMessage
 
 # Create the Requests Dataclass to Store the Request Parameters
 @dataclass
@@ -20,7 +21,7 @@ class OpenAIRequestSchema:
     (SQLite, MemoryRetriever) is bypassed entirely.
     """
     model: str = MODEL
-    messages: List[Dict[str, str]] = field(default_factory=list) # Context of the Converation
+    messages: List[ChatMessage] = field(default_factory=list) # Context of the Conversation
     stream: bool = STREAM
     temperature: float = TEMPERATURE
     max_tokens: int = MAX_TOKENS

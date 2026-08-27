@@ -4,7 +4,8 @@
 # swap `_embedding_fn` for a different sentence-transformers/FAISS setup later if you want to,
 # nothing outside this file needs to know how the vector search works internally.
 import chromadb
-from typing import List, Optional, TypedDict
+from typing import List, Optional, TypedDict, cast
+from chromadb.api.types import Where
 from src.core.config import VECTOR_STORE_PATH, VECTOR_COLLECTION_NAME
 
 # Only these roles get embedded. Tool calls / system messages would otherwise
@@ -85,21 +86,25 @@ class VectorStore:
         if exclude_conversation_id is not None:
             where = {"conversation_id": {"$ne": exclude_conversation_id}}
 
-        results = self._collection.query(query_texts=[query], n_results=top_k, where=where)
+        results = self._collection.query(
+            query_texts=[query],
+            n_results=top_k,
+            where=cast(Where, where),
+        )
 
-        ids = results.get("ids", [[]])[0]
-        docs = results.get("documents", [[]])[0]
-        metas = results.get("metadatas", [[]])[0]
-        distances = results.get("distances", [[]])[0]
+        ids = cast(List[List[str]], results.get("ids") or [[]])[0]
+        docs = cast(List[List[str]], results.get("documents") or [[]])[0]
+        metas = cast(List[List[dict]], results.get("metadatas") or [[]])[0]
+        distances = cast(List[List[float]], results.get("distances") or [[]])[0]
 
         hits = [
             RecalledHit(
                 message_id=int(mid),
-                conversation_id=meta.get("conversation_id"),
-                role=meta.get("role"),
+                conversation_id=int(meta["conversation_id"]),
+                role=str(meta["role"]),
                 content=doc,
                 distance=dist,
-                created_at=meta.get("created_at") or None,
+                created_at=(str(meta["created_at"]) if meta.get("created_at") else None),
             )
             for mid, doc, meta, dist in zip(ids, docs, metas, distances)
         ]

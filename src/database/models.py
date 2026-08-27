@@ -3,6 +3,7 @@
 # depend on the shape of the data without pulling in sqlite3 itself
 from dataclasses import dataclass
 from typing import Optional
+from src.core.message_types import TextContent
 
 
 @dataclass
@@ -20,6 +21,6 @@ class Message:
     id: Optional[int]
     conversation_id: int
     role: str
-    content: str
+    content: TextContent
     created_at: Optional[str] = None
     indexed: int = 0  # 0 = not yet in the vector store, 1 = indexed. See ConversationService.

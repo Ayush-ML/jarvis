@@ -11,12 +11,13 @@ from datetime import datetime, timezone
 from typing import List, NamedTuple, Optional
 from src.memory.vector_store import VectorStore
 from src.core.config import SEMANTIC_TOP_K, SEMANTIC_OVERFETCH, SEMANTIC_MAX_DISTANCE, SEMANTIC_RECENCY_HALFLIFE_DAYS
+from src.core.message_types import TextContent
 
 
 class RecalledMessage(NamedTuple):
     conversation_id: int
     role: str
-    content: str
+    content: TextContent
 
 
 class MemoryRetriever:
@@ -48,7 +49,14 @@ class MemoryRetriever:
             return []
 
         ranked = sorted(hits, key=self._combined_score, reverse=True)[: self.top_k]
-        return [RecalledMessage(h["conversation_id"], h["role"], h["content"]) for h in ranked]
+        return [
+            RecalledMessage(
+                h["conversation_id"],
+                h["role"],
+                {"type": "text", "text": h["content"]},
+            )
+            for h in ranked
+        ]
 
     def _combined_score(self, hit) -> float:
         similarity = 1.0 - hit["distance"]  # cosine distance -> similarity, roughly [-1, 1]

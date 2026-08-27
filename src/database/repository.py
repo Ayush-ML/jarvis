@@ -1,22 +1,24 @@
 # This Script is responsible for all Read/Write Access to the Database
 # Each Repository wraps one Table and returns typed Models instead of raw sqlite3.Row objects
 # Keeping every query here means nothing else in the codebase writes SQL directly
-from typing import List, Optional
+import json
+from typing import Any, List, Optional
 from src.database.db import Database
 from src.database.models import Conversation, Message
+from src.core.message_types import TextContent
 
 
 class ConversationRepository:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    def create(self, title: Optional[str] = None) -> Conversation:
+    def create(self, title: Optional[str] = None) -> Conversation | None:
         with self.db.cursor() as cur:
             cur.execute("INSERT INTO conversations (title) VALUES (?)", (title,))
             new_id = cur.lastrowid
         return self.get(new_id)
 
-    def get(self, conversation_id: int) -> Optional[Conversation]:
+    def get(self, conversation_id: int | None) -> Optional[Conversation]:
         with self.db.cursor() as cur:
             cur.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,))
             row = cur.fetchone()
@@ -47,16 +49,16 @@ class MessageRepository:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    def add(self, conversation_id: int, role: str, content: str) -> Message:
+    def add(self, conversation_id: int, role: str, content: TextContent) -> Message:
         with self.db.cursor() as cur:
             cur.execute(
                 "INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)",
-                (conversation_id, role, content),
+                (conversation_id, role, json.dumps(content, ensure_ascii=False)),
             )
             message_id = cur.lastrowid
             cur.execute("SELECT * FROM messages WHERE id = ?", (message_id,))
             row = cur.fetchone()
-        return Message(**dict(row))
+        return self._message_from_row(row)
 
     def recent(self, conversation_id: int, limit: int) -> List[Message]:
         """Most recent `limit` messages for a conversation, oldest first."""
@@ -69,7 +71,7 @@ class MessageRepository:
                 (conversation_id, limit),
             )
             rows = cur.fetchall()
-        return [Message(**dict(row)) for row in rows]
+        return [self._message_from_row(row) for row in rows]
 
     def mark_indexed(self, message_id: int) -> None:
         with self.db.cursor() as cur:
@@ -88,7 +90,7 @@ class MessageRepository:
                 (limit,),
             )
             rows = cur.fetchall()
-        return [Message(**dict(row)) for row in rows]
+        return [self._message_from_row(row) for row in rows]
 
     def count(self, conversation_id: int) -> int:
         """Cheap count used as a short-circuit before the heavier all_for_conversation() scan."""
@@ -110,4 +112,31 @@ class MessageRepository:
                 (conversation_id,),
             )
             rows = cur.fetchall()
-        return [Message(**dict(row)) for row in rows]
+        return [self._message_from_row(row) for row in rows]
+
+    @staticmethod
+    def _message_from_row(row: Any) -> Message:
+        data = dict(row)
+        data["content"] = MessageRepository._decode_content(data["content"])
+        return Message(**data)
+
+    @staticmethod
+    def _decode_content(raw_content: Any) -> TextContent:
+        """Return canonical content and upgrade legacy plain-text rows on read."""
+        value: Any = raw_content
+        if isinstance(raw_content, str):
+            try:
+                value = json.loads(raw_content)
+            except json.JSONDecodeError:
+                value = raw_content
+
+        if isinstance(value, dict) and isinstance(value.get("text"), str):
+            return {
+                "type": "text",
+                "text": value["text"],
+            }
+
+        return {
+            "type": "text",
+            "text": str(value),
+        }

@@ -18,12 +18,13 @@
 #
 # OpenAIRequestSchema stays a stateless request spec -- construct a NEW instance each turn
 # with this method's output; never mutate `.messages` on a shared instance across turns.
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 from src.database.repository import MessageRepository, ConversationRepository
 from src.database.models import Message
 from src.memory.retriever import MemoryRetriever, RecalledMessage
 from src.memory.profile import load_soul, load_user_profile
 from src.core.config import HISTORY_WINDOW
+from src.core.message_types import ChatMessage
 
 APPROX_CHARS_PER_TOKEN = 4   # rough guard so this doesn't need a tokenizer dependency
 
@@ -48,7 +49,7 @@ class ContextManager:
         self.memory_retriever = memory_retriever
         self.max_context_tokens = max_context_tokens
 
-    def build(self, conversation_id: int, user_input: str) -> List[Dict[str, str]]:
+    def build(self, conversation_id: int, user_input: str) -> List[ChatMessage]:
         soul = load_soul()
         user_profile = load_user_profile()
         conversation = self.conversation_repo.get(conversation_id)
@@ -64,31 +65,31 @@ class ContextManager:
         recalled, remaining = self._fit_recalled(recalled, remaining)
         user_profile, remaining = self._fit_block(user_profile, remaining)
 
-        messages: List[Dict[str, str]] = [{"role": "system", "content": soul}]
+        messages: List[ChatMessage] = [{"role": "system", "content": {"type": "text", "text": soul}}]
 
         if summary:
             messages.append({
                 "role": "system",
-                "content": f"Summary of earlier parts of this conversation:\n{summary}",
+                "content": {"type": "text", "text": f"Summary of earlier parts of this conversation:\n{summary}"}
             })
 
         for msg in history:
             messages.append({"role": msg.role, "content": msg.content})
 
         if recalled:
-            block = "\n".join(f"- ({r.role}, past session) {r.content}" for r in recalled)
+            block = "\n".join(f"- ({r.role}, past session) {r.content['text']}" for r in recalled)
             messages.append({
                 "role": "system",
-                "content": f"Relevant context recalled from past sessions:\n{block}",
+                "content": {"type": "text", "text": f"Relevant context recalled from past sessions:\n{block}"},
             })
 
         if user_profile:
             messages.append({
                 "role": "system",
-                "content": f"What you know about the user:\n{user_profile}",
+                "content": {"type": "text", "text": f"What you know about the user:\n{user_profile}"},
             })
 
-        messages.append({"role": "user", "content": user_input})
+        messages.append({"role": "user", "content": {"type": "text","text": user_input}})
         return messages
 
     @staticmethod
@@ -96,7 +97,7 @@ class ContextManager:
         """Keeps as many of the most recent turns as fit, dropping oldest first."""
         kept, used = [], 0
         for msg in reversed(history):
-            cost = len(msg.content)
+            cost = len(msg.content["text"])
             if used + cost > remaining:
                 break
             used += cost
@@ -108,7 +109,7 @@ class ContextManager:
         """Keeps the most relevant recall hits first (list is already similarity-ranked), drops the rest."""
         kept, used = [], 0
         for msg in recalled:
-            cost = len(msg.content)
+            cost = len(msg.content["text"])
             if used + cost > remaining:
                 break
             used += cost
