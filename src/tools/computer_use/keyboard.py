@@ -4,7 +4,7 @@
 from typing import List
 
 import pyautogui
-
+import time
 from src.tools.registry import Tool
 
 
@@ -17,6 +17,9 @@ def press_key(key: str) -> str:
     pyautogui.press(key)
     return f"Pressed key: {key}"
 
+def wait(sleep: float) -> str:
+    time.sleep(sleep)
+    return f"Did Nothing / Waited for {sleep} Seconds"
 
 def hotkey(keys: List[str]) -> str:
     if not keys:
