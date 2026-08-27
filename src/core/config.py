@@ -52,3 +52,5 @@ SPEAKING_MONITOR_SECONDS = 1.0 # How much recent audio VoiceListener retains as 
 MCP_CONFIG_PATH = "data/mcp_servers.json" # JSON config listing MCP servers to connect to -- mirrors the standard "mcpServers" object convention (same shape as Claude Desktop's config)
 MCP_CONNECT_TIMEOUT_SECONDS = 15 # Max time to wait for a single MCP server to connect before giving up on it and moving on to the rest
 MCP_MAX_INPUT_REQUIRED_ROUNDS = 10 # Safety cap on elicitation retry rounds per tool call -- matches mcp.Client's own default, kept the same for familiarity even though ClientSessionGroup needs its own hand-rolled loop
+MAX_TREE_ENTRIES = 300 # How Many Results the Directory tree can return at once
+MAX_SEARCH_RESULTS = 200 # Max Number of results the Search File Tool can return at once

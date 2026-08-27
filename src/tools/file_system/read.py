@@ -7,11 +7,7 @@ from typing import List, Optional
 import base64, mimetypes
 from src.tools.registry import Tool
 from src.tools.file_system.common import resolve_path
-
-MAX_TREE_ENTRIES = 300
-DEFAULT_TREE_EXCLUDES = {".git", "__pycache__", "node_modules", ".venv", "venv", ".mypy_cache", ".pytest_cache"}
-MAX_SEARCH_RESULTS = 200
-
+from src.core.config import MAX_SEARCH_RESULTS, MAX_TREE_ENTRIES
 
 def _human_size(num_bytes: int) -> str:
     size = float(num_bytes)
@@ -113,7 +109,7 @@ def directory_tree(path: str, max_depth: int = 4, exclude: Optional[List[str]] =
     if not p.is_dir():
         return f"Tool error: '{p}' is not a directory."
 
-    excludes = DEFAULT_TREE_EXCLUDES | set(exclude or [])
+    excludes = []
     lines: List[str] = []
     count = 0
     truncated = False
@@ -251,5 +247,14 @@ TOOLS: List[Tool] = [
         },
         handler=get_file_info,
     ),
-    # TODO: Add the read_media_file tool after completing it to Tool registry
+    Tool(
+        name="read_media_file",
+        description="Inject the Media File that is on the Given Path into Conext to be available for viewing",
+        parameters={
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "Path of the Media File to View"}},
+            "required": ["path"]
+        },
+        handler=read_media_file
+    )
 ]
