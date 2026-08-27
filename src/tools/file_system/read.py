@@ -48,20 +48,17 @@ def read_media_file(path: str) -> str:
         if mime_type is None:
             return "Could Not guess the Mime Type of this File"
 
-        media_type, subtype = mime_type.split("/", 1)
+        media_type, _ = mime_type.split("/", 1)
         if media_type not in {"image", "video", "audio"}:
             return "This Media Type is Unsupported"
 
         file_bytes = p.read_bytes()
         b64_data = base64.b64encode(file_bytes).decode("utf-8")
 
-      # context.inject(f"data:{mime_type};base64,{b64_data})
-      # TODO: Create this function to inject this into the payload 
-      # so that the model can actually see the Media
     except Exception as e:
         return f"Exception Occoured when Reading Media File as e"
 
-    return "Media File has been Processed and Injected into Context Successfully, Encountering no Exceptions"
+    return f"data:{mime_type};base64,{b64_data}"
 
 
 def read_multiple_files(paths: List[str]) -> str:
