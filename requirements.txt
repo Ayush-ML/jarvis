@@ -11,3 +11,6 @@ silero-vad
 onnxruntime
 pywebrtc-audio
 mcp
+pyautogui
+pygetwindow
+pywinauto
