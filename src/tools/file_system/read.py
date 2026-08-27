@@ -4,7 +4,7 @@
 import fnmatch
 from datetime import datetime
 from typing import List, Optional
-
+import base64, mimetypes
 from src.tools.registry import Tool
 from src.tools.file_system.common import resolve_path
 
@@ -22,7 +22,7 @@ def _human_size(num_bytes: int) -> str:
     return f"{size:.1f}PB"
 
 
-def read_file(path: str, head: Optional[int] = None, tail: Optional[int] = None, encoding: str = "utf-8") -> str:
+def read_text_file(path: str, head: Optional[int] = None, tail: Optional[int] = None, encoding: str = "utf-8") -> str:
     if head is not None and tail is not None:
         return "Tool error: specify head or tail, not both."
     p = resolve_path(path)
@@ -40,6 +40,32 @@ def read_file(path: str, head: Optional[int] = None, tail: Optional[int] = None,
     elif tail is not None:
         lines = lines[-tail:]
     return "\n".join(lines)
+
+def read_media_file(path: str) -> str:
+    p = resolve_path(path=path)
+
+    try:
+        if not p.is_file():
+            return "This path either does not or is not a file"
+
+        mime_type, _ = mimetypes.guess_type(p.name)
+        if mime_type is None:
+            return "Could Not guess the Mime Type of this File"
+
+        media_type, subtype = mime_type.split("/", 1)
+        if media_type not in {"image", "video", "audio"}:
+            return "This Media Type is Unsupported"
+
+        file_bytes = p.read_bytes()
+        b64_data = base64.b64encode(file_bytes).decode("utf-8")
+
+      # context.inject(f"data:{mime_type};base64,{b64_data})
+      # TODO: Create this function to inject this into the payload 
+      # so that the model can actually see the Media
+    except Exception as e:
+        return f"Exception Occoured when Reading Media File as e"
+
+    return "Media File has been Processed and Injected into Context Successfully, Encountering no Exceptions"
 
 
 def read_multiple_files(paths: List[str]) -> str:
@@ -166,7 +192,7 @@ TOOLS: List[Tool] = [
             },
             "required": ["path"],
         },
-        handler=read_file,
+        handler=read_text_file,
     ),
     Tool(
         name="read_multiple_files",
@@ -225,4 +251,5 @@ TOOLS: List[Tool] = [
         },
         handler=get_file_info,
     ),
+    # TODO: Add the read_media_file tool after completing it to Tool registry
 ]

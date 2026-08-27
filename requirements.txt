@@ -14,3 +14,6 @@ mcp
 pyautogui
 pygetwindow
 pywinauto
+tempfile
+mimetypes
+base64
