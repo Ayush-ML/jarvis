@@ -14,6 +14,7 @@ mcp
 pyautogui
 pygetwindow
 pywinauto
+playwright
 tempfile
 mimetypes
 base64
