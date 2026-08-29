@@ -1,6 +1,6 @@
-# This Script is responsible for reading page content (text, screenshot) and page-level input
-# that isn't tied to a specific element: scrolling and key presses (e.g. pressing Enter to
-# submit a focused form).
+# This Script is responsible for reading page content (text, screenshot, downloads) and
+# page-level input that isn't tied to a specific element: scrolling and key presses (e.g.
+# pressing Enter to submit a focused form).
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -9,6 +9,7 @@ from src.tools.registry import Tool
 from src.tools.browser_use.session import default_session, BrowserSession
 
 SCREENSHOT_DIR = "data/screenshots"  # same directory computer_use/screen.py uses; kept as its own local constant here deliberately, not a shared import, to avoid coupling unrelated tool categories
+MAX_PAGE_TEXT_CHARS = 8000  # a long article or SPA could otherwise dump tens of thousands of characters straight into a tool-result message, bypassing ContextManager's own budget accounting entirely
 
 
 def get_page_text(session: BrowserSession = default_session) -> str:
@@ -19,6 +20,8 @@ def get_page_text(session: BrowserSession = default_session) -> str:
     text = text.strip()
     if not text:
         return "Page has no visible text content."
+    if len(text) > MAX_PAGE_TEXT_CHARS:
+        return text[:MAX_PAGE_TEXT_CHARS] + f"\n... truncated ({len(text)} total chars). Scroll or narrow the request if more is needed."
     return text
 
 
@@ -52,10 +55,17 @@ def press_key(key: str, session: BrowserSession = default_session) -> str:
     return f"Pressed key: {key}"
 
 
+def get_recent_downloads(session: BrowserSession = default_session) -> str:
+    if not session.recent_downloads:
+        return "No downloads recorded in this session yet."
+    lines = [f"- {path}" for path in session.recent_downloads]
+    return "Recent downloads (most recent last):\n" + "\n".join(lines)
+
+
 TOOLS: List[Tool] = [
     Tool(
         name="get_page_text",
-        description="Get the visible text content of the current page -- how a JARVIS reading the page would summarize what's on it.",
+        description="Get the visible text content of the current page -- how a JARVIS reading the page would summarize what's on it. Truncated on very long pages.",
         parameters={"type": "object", "properties": {}, "required": []},
         handler=get_page_text,
     ),
@@ -87,5 +97,11 @@ TOOLS: List[Tool] = [
             "required": ["key"],
         },
         handler=press_key,
+    ),
+    Tool(
+        name="get_recent_downloads",
+        description="List files downloaded during this browser session, with the local paths they were saved to. Downloads are captured and saved automatically -- this just reports what's already happened.",
+        parameters={"type": "object", "properties": {}, "required": []},
+        handler=get_recent_downloads,
     ),
 ]

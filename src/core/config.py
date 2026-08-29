@@ -53,5 +53,7 @@ MCP_CONFIG_PATH = "data/mcp_servers.json" # JSON config listing MCP servers to c
 MCP_CONNECT_TIMEOUT_SECONDS = 15 # Max time to wait for a single MCP server to connect before giving up on it and moving on to the rest
 MCP_MAX_INPUT_REQUIRED_ROUNDS = 10 # Safety cap on elicitation retry rounds per tool call -- matches mcp.Client's own default, kept the same for familiarity even though ClientSessionGroup needs its own hand-rolled loop
 BROWSER_HEADLESS = False # Visible browser window by default -- mirrors computer_use operating on the real visible desktop, not a hidden display
+BROWSER_ACTION_TIMEOUT_MS = 8000 # Playwright's own default is 30000ms -- an unresolvable click_element locator would otherwise stall this synchronous tool-calling turn for 30s
+BROWSER_NAVIGATION_TIMEOUT_MS = 15000 # Navigation legitimately takes longer than a click/type action, so gets its own longer allowance
 MAX_TREE_ENTRIES = 300 # How Many Results the Directory tree can return at once
 MAX_SEARCH_RESULTS = 200 # Max Number of results the Search File Tool can return at once
